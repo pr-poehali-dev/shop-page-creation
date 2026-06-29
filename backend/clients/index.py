@@ -173,11 +173,24 @@ def handler(event: dict, context) -> dict:
             if not _get_client_for_user(cur, client_id, auth):
                 return {'statusCode': 403, 'headers': cors, 'body': json.dumps({'error': 'Нет доступа'})}
             if method == 'GET':
-                cur.execute("SELECT * FROM photos WHERE client_id = %s ORDER BY created_at DESC", (client_id,))
+                visit_id = params.get('visit_id')
+                if visit_id:
+                    cur.execute(
+                        "SELECT * FROM photos WHERE client_id = %s AND visit_id = %s ORDER BY photo_type, created_at",
+                        (client_id, int(visit_id)),
+                    )
+                else:
+                    cur.execute("SELECT * FROM photos WHERE client_id = %s ORDER BY created_at DESC", (client_id,))
                 return {'statusCode': 200, 'headers': cors, 'body': json.dumps([serialize(r) for r in cur.fetchall()])}
             if method == 'POST':
                 if auth['role'] != 'master':
                     return {'statusCode': 403, 'headers': cors, 'body': json.dumps({'error': 'Нет прав'})}
+                visit_id = body.get('visit_id')
+                photo_type = body.get('photo_type') if body.get('photo_type') in ('before', 'after', 'process') else 'process'
+                if visit_id:
+                    cur.execute("SELECT COUNT(*) AS cnt FROM photos WHERE visit_id = %s", (int(visit_id),))
+                    if cur.fetchone()['cnt'] >= 10:
+                        return {'statusCode': 400, 'headers': cors, 'body': json.dumps({'error': 'Можно загрузить не более 10 фото на визит'})}
                 file_b64 = body.get('file_base64', '')
                 if ',' in file_b64:
                     file_b64 = file_b64.split(',', 1)[1]
@@ -191,8 +204,8 @@ def handler(event: dict, context) -> dict:
                 s3.put_object(Bucket='files', Key=key, Body=data, ContentType='image/jpeg')
                 url = f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
                 cur.execute(
-                    "INSERT INTO photos (client_id, url, caption) VALUES (%s, %s, %s) RETURNING *",
-                    (client_id, url, body.get('caption')),
+                    "INSERT INTO photos (client_id, visit_id, photo_type, url, caption) VALUES (%s, %s, %s, %s, %s) RETURNING *",
+                    (client_id, int(visit_id) if visit_id else None, photo_type, url, body.get('caption')),
                 )
                 row = cur.fetchone()
                 conn.commit()

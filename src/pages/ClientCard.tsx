@@ -9,7 +9,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import Icon from '@/components/ui/icon';
 import VisitForm from '@/components/VisitForm';
-import { api, getSession, type Client, type Visit, type Photo } from '@/lib/api';
+import Lightbox from '@/components/Lightbox';
+import { api, getSession, type Client, type Visit, type Photo, type PhotoType } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 
 const CONDITIONS: { key: keyof Client; label: string }[] = [
@@ -32,6 +33,7 @@ const ClientCard = () => {
   const [saving, setSaving] = useState(false);
 
   const [visitOpen, setVisitOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const cid = Number(id);
 
@@ -73,30 +75,13 @@ const ClientCard = () => {
     }
   };
 
-  const addVisit = async (data: Partial<Visit>) => {
-    try {
-      await api.createVisit({ ...data, client_id: cid });
-      await reload();
-      setVisitOpen(false);
-      toast({ title: 'Сохранено', description: 'Визит добавлен' });
-    } catch (err) {
-      toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
-    }
-  };
-
-  const uploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        await api.uploadPhoto(cid, reader.result as string);
-        setPhotos(await api.listPhotos(cid));
-      } catch (err) {
-        toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
-      }
-    };
-    reader.readAsDataURL(file);
+  const addVisit = async (data: Partial<Visit>): Promise<Visit> => {
+    const created = await api.createVisit({ ...data, client_id: cid });
+    await reload();
+    setPhotos(await api.listPhotos(cid));
+    setVisitOpen(false);
+    toast({ title: 'Сохранено', description: 'Визит добавлен' });
+    return created;
   };
 
   if (!client) return <div className="min-h-screen flex items-center justify-center text-gray-400">Загрузка…</div>;
@@ -108,6 +93,14 @@ const ClientCard = () => {
       ? new Date(v.visit_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
       : fmt(v.visit_date);
   const fmtPrice = (p?: number) => (p != null ? `${Number(p).toLocaleString('ru-RU')} ₽` : '');
+
+  // Группировка фото по визитам
+  const visitById = new Map(visits.map((v) => [v.id, v]));
+  const TYPE_LABELS: Record<PhotoType, string> = { before: 'До', after: 'После', process: 'Процесс' };
+  const grouped = visits
+    .map((v) => ({ visit: v, items: photos.filter((p) => p.visit_id === v.id) }))
+    .filter((g) => g.items.length > 0);
+  const orphan = photos.filter((p) => !p.visit_id || !visitById.has(p.visit_id));
 
   return (
     <div className="min-h-screen bg-[#f5f5f5]">
@@ -216,34 +209,77 @@ const ClientCard = () => {
                 <DialogHeader>
                   <DialogTitle>Новый визит</DialogTitle>
                 </DialogHeader>
-                <VisitForm onSave={addVisit} />
+                <VisitForm clientId={cid} onSave={addVisit} />
               </DialogContent>
             </Dialog>
           </TabsContent>
 
           <TabsContent value="photos">
-            {!readOnly && (
-              <label className="block bg-white rounded-2xl p-6 mb-4 text-center cursor-pointer border-2 border-dashed border-gray-200 hover:border-primary transition-colors">
-                <Icon name="Camera" size={28} className="mx-auto text-primary mb-2" />
-                <span className="text-sm text-gray-500">Загрузить фото</span>
-                <input type="file" accept="image/*" className="hidden" onChange={uploadPhoto} />
-              </label>
-            )}
-            {photos.length === 0 ? (
+            <p className="text-xs text-gray-400 mb-4">Фотографии загружаются при добавлении или редактировании визита</p>
+            {grouped.length === 0 && orphan.length === 0 ? (
               <p className="text-center text-gray-400 py-8">Фото пока нет</p>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {photos.map((p) => (
-                  <img key={p.id} src={p.url} alt="" className="w-full aspect-square object-cover rounded-2xl" />
-                ))}
+              <div className="space-y-6">
+                {grouped.map(({ visit, items }) => {
+                  const before = items.filter((p) => p.photo_type === 'before');
+                  const after = items.filter((p) => p.photo_type === 'after');
+                  const process = items.filter((p) => p.photo_type === 'process' || !p.photo_type);
+                  const pairs = Math.max(before.length, after.length);
+                  return (
+                    <div key={visit.id} className="bg-white rounded-2xl p-4">
+                      {pairs > 0 && (
+                        <div className="space-y-3">
+                          {Array.from({ length: pairs }).map((_, i) => (
+                            <div key={i} className="grid grid-cols-2 gap-2">
+                              <PhotoSlot photo={before[i]} label="До" onOpen={setLightbox} />
+                              <PhotoSlot photo={after[i]} label="После" onOpen={setLightbox} />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {process.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2 mt-3">
+                          {process.map((p) => (
+                            <img key={p.id} src={p.url} alt="" onClick={() => setLightbox(p.url)} className="w-full aspect-square object-cover rounded-lg cursor-pointer" />
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-sm text-gray-500 mt-3">
+                        <span className="font-medium text-gray-700">{fmtDT(visit)}</span>
+                        {visit.procedure && ` — ${visit.procedure}`}
+                      </p>
+                    </div>
+                  );
+                })}
+
+                {orphan.length > 0 && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {orphan.map((p) => (
+                      <img key={p.id} src={p.url} alt="" onClick={() => setLightbox(p.url)} className="w-full aspect-square object-cover rounded-2xl cursor-pointer" />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </TabsContent>
         </Tabs>
       </main>
+
+      <Lightbox url={lightbox} onClose={() => setLightbox(null)} />
     </div>
   );
 };
+
+const PhotoSlot = ({ photo, label, onOpen }: { photo?: Photo; label: string; onOpen: (u: string) => void }) => (
+  <div>
+    {photo ? (
+      <img src={photo.url} alt="" onClick={() => onOpen(photo.url)} className="w-full aspect-square object-cover rounded-lg cursor-pointer" />
+    ) : (
+      <div className="w-full aspect-square rounded-lg bg-gray-100 flex items-center justify-center text-gray-300 text-sm">нет фото</div>
+    )}
+    <p className="text-center text-xs text-gray-500 mt-1">{label}</p>
+  </div>
+);
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <div>

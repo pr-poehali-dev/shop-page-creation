@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import Icon from '@/components/ui/icon';
 import VisitForm from '@/components/VisitForm';
-import { api, getSession, type Visit } from '@/lib/api';
+import Lightbox from '@/components/Lightbox';
+import { api, getSession, type Visit, type Photo } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 
 const VisitDetail = () => {
@@ -14,13 +15,16 @@ const VisitDetail = () => {
   const readOnly = session?.role !== 'master';
   const [params] = useSearchParams();
   const [visit, setVisit] = useState<Visit | null>(null);
+  const [photos, setPhotos] = useState<Photo[]>([]);
   const [editOpen, setEditOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const cid = Number(id);
   const vid = Number(visitId);
 
   const load = async () => {
     setVisit(await api.getVisit(vid));
+    setPhotos(await api.listVisitPhotos(cid, vid));
   };
 
   useEffect(() => {
@@ -30,8 +34,7 @@ const VisitDetail = () => {
     }
     (async () => {
       try {
-        const v = await api.getVisit(vid);
-        setVisit(v);
+        await load();
         if (params.get('edit') === '1' && session.role === 'master') setEditOpen(true);
       } catch (err) {
         toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
@@ -40,15 +43,12 @@ const VisitDetail = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const saveEdit = async (data: Partial<Visit>) => {
-    try {
-      await api.updateVisit({ ...data, id: vid, client_id: cid });
-      await load();
-      setEditOpen(false);
-      toast({ title: 'Сохранено', description: 'Визит обновлён' });
-    } catch (err) {
-      toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
-    }
+  const saveEdit = async (data: Partial<Visit>): Promise<Visit> => {
+    const updated = await api.updateVisit({ ...data, id: vid, client_id: cid });
+    await load();
+    setEditOpen(false);
+    toast({ title: 'Сохранено', description: 'Визит обновлён' });
+    return updated;
   };
 
   if (!visit) return <div className="min-h-screen flex items-center justify-center text-gray-400">Загрузка…</div>;
@@ -58,6 +58,11 @@ const VisitDetail = () => {
     visit.visit_at
       ? new Date(visit.visit_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
       : fmt(visit.visit_date);
+
+  const before = photos.filter((p) => p.photo_type === 'before');
+  const after = photos.filter((p) => p.photo_type === 'after');
+  const process = photos.filter((p) => p.photo_type === 'process' || !p.photo_type);
+  const pairs = Math.max(before.length, after.length);
 
   return (
     <div className="min-h-screen bg-[#f5f5f5]">
@@ -83,8 +88,30 @@ const VisitDetail = () => {
         </div>
 
         <div className="bg-white rounded-2xl p-5">
-          <p className="font-semibold text-gray-700 mb-2">Фотографии</p>
-          <p className="text-sm text-gray-400">Фото будут добавлены позже</p>
+          <p className="font-semibold text-gray-700 mb-3">Фотографии</p>
+          {photos.length === 0 ? (
+            <p className="text-sm text-gray-400">Фото пока нет — добавьте их при редактировании визита</p>
+          ) : (
+            <>
+              {pairs > 0 && (
+                <div className="space-y-3 mb-3">
+                  {Array.from({ length: pairs }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-2 gap-2">
+                      <Slot photo={before[i]} label="До" onOpen={setLightbox} />
+                      <Slot photo={after[i]} label="После" onOpen={setLightbox} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {process.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {process.map((p) => (
+                    <img key={p.id} src={p.url} alt="" onClick={() => setLightbox(p.url)} className="w-full aspect-square object-cover rounded-lg cursor-pointer" />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {!readOnly && (
@@ -99,12 +126,25 @@ const VisitDetail = () => {
           <DialogHeader>
             <DialogTitle>Редактировать визит</DialogTitle>
           </DialogHeader>
-          <VisitForm initial={visit} onSave={saveEdit} saveLabel="Сохранить изменения" />
+          <VisitForm initial={visit} clientId={cid} onSave={saveEdit} saveLabel="Сохранить изменения" />
         </DialogContent>
       </Dialog>
+
+      <Lightbox url={lightbox} onClose={() => setLightbox(null)} />
     </div>
   );
 };
+
+const Slot = ({ photo, label, onOpen }: { photo?: Photo; label: string; onOpen: (u: string) => void }) => (
+  <div>
+    {photo ? (
+      <img src={photo.url} alt="" onClick={() => onOpen(photo.url)} className="w-full aspect-square object-cover rounded-lg cursor-pointer" />
+    ) : (
+      <div className="w-full aspect-square rounded-lg bg-gray-100 flex items-center justify-center text-gray-300 text-sm">нет фото</div>
+    )}
+    <p className="text-center text-xs text-gray-500 mt-1">{label}</p>
+  </div>
+);
 
 const Row = ({ label, value, multiline, highlight }: { label: string; value?: string; multiline?: boolean; highlight?: boolean }) => (
   <div>

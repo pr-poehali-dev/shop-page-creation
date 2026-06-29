@@ -36,11 +36,16 @@ export interface Visit {
   notes?: string;
 }
 
+export type PhotoType = 'before' | 'after' | 'process';
+
 export interface Photo {
   id: number;
   client_id: number;
+  visit_id?: number;
+  photo_type?: PhotoType;
   url: string;
   caption?: string;
+  created_at?: string;
 }
 
 function getToken(): string {
@@ -82,8 +87,10 @@ export const api = {
     req(`${CLIENTS_URL}?resource=visits`, { method: 'PUT', body: JSON.stringify(data) }),
 
   listPhotos: (client_id: number): Promise<Photo[]> => req(`${CLIENTS_URL}?resource=photos&client_id=${client_id}`),
-  uploadPhoto: (client_id: number, file_base64: string, caption?: string): Promise<Photo> =>
-    req(`${CLIENTS_URL}?resource=photos`, { method: 'POST', body: JSON.stringify({ client_id, file_base64, caption }) }),
+  listVisitPhotos: (client_id: number, visit_id: number): Promise<Photo[]> =>
+    req(`${CLIENTS_URL}?resource=photos&client_id=${client_id}&visit_id=${visit_id}`),
+  uploadPhoto: (data: { client_id: number; file_base64: string; visit_id?: number; photo_type?: PhotoType; caption?: string }): Promise<Photo> =>
+    req(`${CLIENTS_URL}?resource=photos`, { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export interface Session {
