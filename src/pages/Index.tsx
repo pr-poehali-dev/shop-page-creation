@@ -1,21 +1,80 @@
-const Index = () => {
-  return (
-    <div className="relative min-h-screen overflow-hidden bg-[#0a0a0f] flex items-center justify-center font-body">
-      <div className="pointer-events-none absolute -top-1/4 -left-1/4 h-[60vw] w-[60vw] rounded-full bg-[#ff3d81] opacity-30 blur-[120px]" />
-      <div className="pointer-events-none absolute -bottom-1/4 -right-1/4 h-[55vw] w-[55vw] rounded-full bg-[#5b2bff] opacity-30 blur-[120px]" />
-      <div className="pointer-events-none absolute top-1/3 right-1/4 h-[35vw] w-[35vw] rounded-full bg-[#00e0c6] opacity-20 blur-[110px]" />
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import Icon from '@/components/ui/icon';
+import { api, saveSession, getSession } from '@/lib/api';
+import { toast } from '@/components/ui/use-toast';
 
-      <div className="relative z-10 px-6 text-center">
-        <p className="mb-6 font-body text-sm uppercase tracking-[0.5em] text-white/50">
-          Добро пожаловать
-        </p>
-        <h1 className="font-display text-[22vw] font-900 leading-none text-transparent bg-clip-text bg-gradient-to-r from-[#ff3d81] via-[#a855f7] to-[#00e0c6] md:text-[15vw]">
-          щшоп
-        </h1>
-        <div className="mx-auto mt-8 h-px w-24 bg-white/20" />
-        <p className="mx-auto mt-8 max-w-md font-body text-base text-white/40">
-          Первая версия страницы готова
-        </p>
+const Index = () => {
+  const navigate = useNavigate();
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (getSession()) navigate('/dashboard');
+  }, [navigate]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res =
+        mode === 'login'
+          ? await api.login(email, password)
+          : await api.register(email, password, fullName, 'master');
+      saveSession(res);
+      navigate('/dashboard');
+    } catch (err) {
+      toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#f9e4e4] p-4">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl p-8">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4">
+            <Icon name="Footprints" size={32} className="text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-800" style={{ fontFamily: 'Unbounded, sans-serif' }}>
+            ПодоКарта
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">CRM для мастера педикюра и подолога</p>
+        </div>
+
+        <form onSubmit={submit} className="space-y-4">
+          {mode === 'register' && (
+            <div>
+              <Label htmlFor="name">Ваше имя</Label>
+              <Input id="name" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Имя мастера" className="mt-1" />
+            </div>
+          )}
+          <div>
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@mail.ru" required className="mt-1" />
+          </div>
+          <div>
+            <Label htmlFor="password">Пароль</Label>
+            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••" required className="mt-1" />
+          </div>
+          <Button type="submit" disabled={loading} className="w-full h-11 text-base">
+            {loading ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+          </Button>
+        </form>
+
+        <button
+          onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+          className="w-full text-center text-sm text-primary mt-6 hover:underline"
+        >
+          {mode === 'login' ? 'Нет аккаунта? Создать мастера' : 'Уже есть аккаунт? Войти'}
+        </button>
       </div>
     </div>
   );
