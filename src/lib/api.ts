@@ -91,7 +91,29 @@ export const api = {
     req(`${CLIENTS_URL}?resource=photos&client_id=${client_id}&visit_id=${visit_id}`),
   uploadPhoto: (data: { client_id: number; file_base64: string; visit_id?: number; photo_type?: PhotoType; caption?: string }): Promise<Photo> =>
     req(`${CLIENTS_URL}?resource=photos`, { method: 'POST', body: JSON.stringify(data) }),
+
+  getProfile: (): Promise<MasterProfile> => req(`${CLIENTS_URL}?resource=profile`),
+  updateProfile: (data: { full_name?: string; phone?: string }): Promise<MasterProfile> =>
+    req(`${CLIENTS_URL}?resource=profile`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  getMyCabinet: (): Promise<ClientCabinet> => req(`${CLIENTS_URL}?resource=me`),
 };
+
+export interface MasterProfile {
+  id: number;
+  email: string;
+  role: string;
+  full_name?: string;
+  phone?: string;
+}
+
+export interface ClientCabinet {
+  linked: boolean;
+  client?: Client;
+  visits?: Visit[];
+  photos?: Photo[];
+  master?: { full_name?: string; phone?: string };
+}
 
 export interface Session {
   token: string;

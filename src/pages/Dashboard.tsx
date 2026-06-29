@@ -21,15 +21,45 @@ const Dashboard = () => {
   const [open, setOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [pName, setPName] = useState('');
+  const [pPhone, setPPhone] = useState('');
 
   useEffect(() => {
     if (!session) {
       navigate('/');
       return;
     }
+    if (session.role === 'client') {
+      navigate('/cabinet');
+      return;
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const openProfile = async () => {
+    try {
+      const p = await api.getProfile();
+      setPName(p.full_name || '');
+      setPPhone(p.phone || '');
+      setProfileOpen(true);
+    } catch (err) {
+      toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
+    }
+  };
+
+  const saveProfile = async () => {
+    try {
+      await api.updateProfile({ full_name: pName, phone: pPhone });
+      setProfileOpen(false);
+      toast({ title: 'Сохранено', description: 'Профиль обновлён' });
+    } catch (err) {
+      toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
+    }
+  };
 
   const load = async () => {
     try {
@@ -52,10 +82,11 @@ const Dashboard = () => {
   const addClient = async () => {
     if (!newName.trim()) return;
     try {
-      await api.createClient({ full_name: newName, phone: newPhone });
+      await api.createClient({ full_name: newName, phone: newPhone, email: newEmail });
       setOpen(false);
       setNewName('');
       setNewPhone('');
+      setNewEmail('');
       load();
     } catch (err) {
       toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
@@ -80,9 +111,14 @@ const Dashboard = () => {
             </div>
             <span className="font-bold text-gray-800" style={{ fontFamily: 'Unbounded, sans-serif' }}>ПодоКарта</span>
           </div>
-          <button onClick={logout} className="text-gray-400 hover:text-primary">
-            <Icon name="LogOut" size={20} />
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={openProfile} className="text-gray-400 hover:text-primary">
+              <Icon name="Settings" size={20} />
+            </button>
+            <button onClick={logout} className="text-gray-400 hover:text-primary">
+              <Icon name="LogOut" size={20} />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -158,9 +194,36 @@ const Dashboard = () => {
               <Label htmlFor="cp">Телефон</Label>
               <Input id="cp" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="+7 900 000-00-00" className="mt-1" />
             </div>
+            <div>
+              <Label htmlFor="ce">Email клиента</Label>
+              <Input id="ce" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="client@mail.ru" className="mt-1" />
+              <p className="text-xs text-gray-400 mt-1">Если клиент зарегистрируется с этим email — он увидит свою карту в личном кабинете</p>
+            </div>
           </div>
           <DialogFooter>
             <Button onClick={addClient}>Добавить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Профиль мастера</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="pn">Имя мастера</Label>
+              <Input id="pn" value={pName} onChange={(e) => setPName(e.target.value)} placeholder="Анна Петрова" className="mt-1" />
+            </div>
+            <div>
+              <Label htmlFor="pp">Телефон (WhatsApp)</Label>
+              <Input id="pp" value={pPhone} onChange={(e) => setPPhone(e.target.value)} placeholder="+7 900 000-00-00" className="mt-1" />
+              <p className="text-xs text-gray-400 mt-1">Этот номер увидят клиенты в кнопке «Написать мастеру»</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={saveProfile}>Сохранить</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

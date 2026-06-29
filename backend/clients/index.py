@@ -64,6 +64,43 @@ def handler(event: dict, context) -> dict:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
+        # === ПРОФИЛЬ МАСТЕРА ===
+        if resource == 'profile':
+            if method == 'GET':
+                cur.execute("SELECT id, email, role, full_name, phone FROM users WHERE id = %s", (auth['user_id'],))
+                return {'statusCode': 200, 'headers': cors, 'body': json.dumps(serialize(cur.fetchone()))}
+            if method == 'PUT':
+                cur.execute(
+                    "UPDATE users SET full_name = %s, phone = %s WHERE id = %s RETURNING id, email, role, full_name, phone",
+                    (body.get('full_name'), body.get('phone'), auth['user_id']),
+                )
+                row = cur.fetchone()
+                conn.commit()
+                return {'statusCode': 200, 'headers': cors, 'body': json.dumps(serialize(row))}
+
+        # === КАБИНЕТ КЛИЕНТА ===
+        if resource == 'me':
+            cur.execute("SELECT * FROM clients WHERE client_user_id = %s ORDER BY id LIMIT 1", (auth['user_id'],))
+            client = cur.fetchone()
+            if not client:
+                return {'statusCode': 200, 'headers': cors, 'body': json.dumps({'linked': False})}
+            cur.execute(
+                "SELECT * FROM visits WHERE client_id = %s ORDER BY COALESCE(visit_at, visit_date::timestamp) DESC",
+                (client['id'],),
+            )
+            visits = [serialize(v) for v in cur.fetchall()]
+            cur.execute("SELECT * FROM photos WHERE client_id = %s ORDER BY created_at DESC", (client['id'],))
+            photos = [serialize(p) for p in cur.fetchall()]
+            cur.execute("SELECT full_name, phone FROM users WHERE id = %s", (client['master_id'],))
+            master = serialize(cur.fetchone() or {})
+            return {'statusCode': 200, 'headers': cors, 'body': json.dumps({
+                'linked': True,
+                'client': serialize(client),
+                'visits': visits,
+                'photos': photos,
+                'master': master,
+            })}
+
         # === КЛИЕНТЫ ===
         if resource == 'clients':
             if method == 'GET':
@@ -88,9 +125,11 @@ def handler(event: dict, context) -> dict:
             if method == 'POST':
                 if auth['role'] != 'master':
                     return {'statusCode': 403, 'headers': cors, 'body': json.dumps({'error': 'Нет прав'})}
+                email = (body.get('email') or '').strip().lower() or None
+                client_user_id = _find_client_user(cur, email)
                 cur.execute(
-                    "INSERT INTO clients (master_id, full_name, phone, email) VALUES (%s, %s, %s, %s) RETURNING *",
-                    (auth['user_id'], body.get('full_name', 'Без имени'), body.get('phone'), body.get('email')),
+                    "INSERT INTO clients (master_id, full_name, phone, email, client_user_id) VALUES (%s, %s, %s, %s, %s) RETURNING *",
+                    (auth['user_id'], body.get('full_name', 'Без имени'), body.get('phone'), email, client_user_id),
                 )
                 row = cur.fetchone()
                 conn.commit()
@@ -109,6 +148,11 @@ def handler(event: dict, context) -> dict:
                     if f in body:
                         sets.append(f"{f} = %s")
                         vals.append(body[f] if body[f] != '' else None)
+                if 'email' in body and body.get('email') and not existing.get('client_user_id'):
+                    cu = _find_client_user(cur, (body.get('email') or '').strip().lower())
+                    if cu:
+                        sets.append("client_user_id = %s")
+                        vals.append(cu)
                 if sets:
                     vals.extend([client_id, auth['user_id']])
                     cur.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id = %s AND master_id = %s RETURNING *", vals)
@@ -221,6 +265,14 @@ def _num(v):
     if v is None or v == '':
         return None
     return v
+
+
+def _find_client_user(cur, email):
+    if not email:
+        return None
+    cur.execute("SELECT id FROM users WHERE email = %s AND role = 'client'", (email,))
+    r = cur.fetchone()
+    return r['id'] if r else None
 
 
 def _refresh_client_dates(cur, client_id: int, next_visit_date):
