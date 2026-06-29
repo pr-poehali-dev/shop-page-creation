@@ -6,7 +6,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import Icon from '@/components/ui/icon';
+import VisitForm from '@/components/VisitForm';
 import { api, getSession, type Client, type Visit, type Photo } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 
@@ -29,12 +31,14 @@ const ClientCard = () => {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // visit form
-  const [vDate, setVDate] = useState('');
-  const [vProc, setVProc] = useState('');
-  const [vNotes, setVNotes] = useState('');
+  const [visitOpen, setVisitOpen] = useState(false);
 
   const cid = Number(id);
+
+  const reload = async () => {
+    setClient(await api.getClient(cid));
+    setVisits(await api.listVisits(cid));
+  };
 
   useEffect(() => {
     if (!session) {
@@ -69,14 +73,12 @@ const ClientCard = () => {
     }
   };
 
-  const addVisit = async () => {
-    if (!vDate) return;
+  const addVisit = async (data: Partial<Visit>) => {
     try {
-      await api.createVisit({ client_id: cid, visit_date: vDate, procedure: vProc, notes: vNotes });
-      setVisits(await api.listVisits(cid));
-      setVDate('');
-      setVProc('');
-      setVNotes('');
+      await api.createVisit({ ...data, client_id: cid });
+      await reload();
+      setVisitOpen(false);
+      toast({ title: 'Сохранено', description: 'Визит добавлен' });
     } catch (err) {
       toast({ title: 'Ошибка', description: (err as Error).message, variant: 'destructive' });
     }
@@ -101,6 +103,11 @@ const ClientCard = () => {
 
   const showBanner = !!client.contraindications?.trim() || CONDITIONS.some((c) => client[c.key]);
   const fmt = (d?: string) => (d ? new Date(d).toLocaleDateString('ru-RU') : '');
+  const fmtDT = (v: Visit) =>
+    v.visit_at
+      ? new Date(v.visit_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : fmt(v.visit_date);
+  const fmtPrice = (p?: number) => (p != null ? `${Number(p).toLocaleString('ru-RU')} ₽` : '');
 
   return (
     <div className="min-h-screen bg-[#f5f5f5]">
@@ -174,13 +181,9 @@ const ClientCard = () => {
 
           <TabsContent value="visits">
             {!readOnly && (
-              <div className="bg-white rounded-2xl p-5 mb-4 space-y-3">
-                <p className="font-semibold text-gray-700">Новый визит</p>
-                <Input type="date" value={vDate} onChange={(e) => setVDate(e.target.value)} />
-                <Input placeholder="Процедура" value={vProc} onChange={(e) => setVProc(e.target.value)} />
-                <Textarea placeholder="Заметки" value={vNotes} onChange={(e) => setVNotes(e.target.value)} />
-                <Button onClick={addVisit} className="w-full">Добавить визит</Button>
-              </div>
+              <Button onClick={() => setVisitOpen(true)} className="w-full mb-4">
+                <Icon name="Plus" size={18} className="mr-1" /> Добавить визит
+              </Button>
             )}
             <div className="space-y-3">
               {visits.length === 0 ? (
@@ -188,13 +191,34 @@ const ClientCard = () => {
               ) : (
                 visits.map((v) => (
                   <div key={v.id} className="bg-white rounded-2xl p-4">
-                    <p className="font-semibold text-gray-800">{fmt(v.visit_date)}</p>
-                    {v.procedure && <p className="text-sm text-gray-600 mt-1">{v.procedure}</p>}
-                    {v.notes && <p className="text-sm text-gray-400 mt-1">{v.notes}</p>}
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-gray-800">{fmtDT(v)}</p>
+                      {v.price != null && <span className="text-primary font-semibold whitespace-nowrap">{fmtPrice(v.price)}</span>}
+                    </div>
+                    {v.procedure && <p className="text-sm text-gray-600 mt-1 line-clamp-2">{v.procedure}</p>}
+                    <div className="flex gap-2 mt-3">
+                      <Button variant="outline" size="sm" onClick={() => navigate(`/client/${cid}/visit/${v.id}`)}>
+                        Подробнее
+                      </Button>
+                      {!readOnly && (
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/client/${cid}/visit/${v.id}?edit=1`)}>
+                          <Icon name="Pencil" size={15} className="mr-1" /> Редактировать
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
             </div>
+
+            <Dialog open={visitOpen} onOpenChange={setVisitOpen}>
+              <DialogContent className="max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Новый визит</DialogTitle>
+                </DialogHeader>
+                <VisitForm onSave={addVisit} />
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           <TabsContent value="photos">

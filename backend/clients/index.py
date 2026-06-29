@@ -119,20 +119,51 @@ def handler(event: dict, context) -> dict:
 
         # === ВИЗИТЫ ===
         if resource == 'visits':
+            if method == 'GET' and params.get('id'):
+                visit_id = int(params['id'])
+                cur.execute("SELECT * FROM visits WHERE id = %s", (visit_id,))
+                v = cur.fetchone()
+                if not v or not _get_client_for_user(cur, v['client_id'], auth):
+                    return {'statusCode': 404, 'headers': cors, 'body': json.dumps({'error': 'Визит не найден'})}
+                return {'statusCode': 200, 'headers': cors, 'body': json.dumps(serialize(v))}
+
             client_id = int(params.get('client_id') or body.get('client_id'))
             if not _get_client_for_user(cur, client_id, auth):
                 return {'statusCode': 403, 'headers': cors, 'body': json.dumps({'error': 'Нет доступа'})}
             if method == 'GET':
-                cur.execute("SELECT * FROM visits WHERE client_id = %s ORDER BY visit_date DESC", (client_id,))
+                cur.execute("SELECT * FROM visits WHERE client_id = %s ORDER BY COALESCE(visit_at, visit_date::timestamp) DESC", (client_id,))
                 return {'statusCode': 200, 'headers': cors, 'body': json.dumps([serialize(r) for r in cur.fetchall()])}
             if method == 'POST':
                 if auth['role'] != 'master':
                     return {'statusCode': 403, 'headers': cors, 'body': json.dumps({'error': 'Нет прав'})}
+                visit_at = body.get('visit_at')
+                visit_date = (visit_at or '')[:10] or body.get('visit_date')
                 cur.execute(
-                    "INSERT INTO visits (client_id, visit_date, procedure, notes) VALUES (%s, %s, %s, %s) RETURNING *",
-                    (client_id, body.get('visit_date'), body.get('procedure'), body.get('notes')),
+                    "INSERT INTO visits (client_id, visit_date, visit_at, duration_minutes, procedure, materials, result, recommendations, next_visit_date, price, notes) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *",
+                    (client_id, visit_date or None, visit_at or None, _num(body.get('duration_minutes')), body.get('procedure'),
+                     body.get('materials'), body.get('result'), body.get('recommendations'),
+                     body.get('next_visit_date') or None, _num(body.get('price')), body.get('notes')),
                 )
                 row = cur.fetchone()
+                _refresh_client_dates(cur, client_id, body.get('next_visit_date'))
+                conn.commit()
+                return {'statusCode': 200, 'headers': cors, 'body': json.dumps(serialize(row))}
+            if method == 'PUT':
+                if auth['role'] != 'master':
+                    return {'statusCode': 403, 'headers': cors, 'body': json.dumps({'error': 'Нет прав'})}
+                visit_id = int(body.get('id'))
+                visit_at = body.get('visit_at')
+                visit_date = (visit_at or '')[:10] or body.get('visit_date')
+                cur.execute(
+                    "UPDATE visits SET visit_date=%s, visit_at=%s, duration_minutes=%s, procedure=%s, materials=%s, "
+                    "result=%s, recommendations=%s, next_visit_date=%s, price=%s, notes=%s WHERE id=%s AND client_id=%s RETURNING *",
+                    (visit_date or None, visit_at or None, _num(body.get('duration_minutes')), body.get('procedure'),
+                     body.get('materials'), body.get('result'), body.get('recommendations'),
+                     body.get('next_visit_date') or None, _num(body.get('price')), body.get('notes'), visit_id, client_id),
+                )
+                row = cur.fetchone()
+                _refresh_client_dates(cur, client_id, body.get('next_visit_date'))
                 conn.commit()
                 return {'statusCode': 200, 'headers': cors, 'body': json.dumps(serialize(row))}
 
@@ -171,6 +202,21 @@ def handler(event: dict, context) -> dict:
     finally:
         cur.close()
         conn.close()
+
+
+def _num(v):
+    if v is None or v == '':
+        return None
+    return v
+
+
+def _refresh_client_dates(cur, client_id: int, next_visit_date):
+    cur.execute(
+        "UPDATE clients SET next_visit_date = COALESCE("
+        "(SELECT MAX(next_visit_date) FROM visits WHERE client_id = %s), %s) "
+        "WHERE id = %s",
+        (client_id, next_visit_date or None, client_id),
+    )
 
 
 def _get_client_for_user(cur, client_id: int, auth: dict):

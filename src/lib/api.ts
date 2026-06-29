@@ -25,7 +25,14 @@ export interface Visit {
   id: number;
   client_id: number;
   visit_date: string;
+  visit_at?: string;
+  duration_minutes?: number;
   procedure?: string;
+  materials?: string;
+  result?: string;
+  recommendations?: string;
+  next_visit_date?: string;
+  price?: number;
   notes?: string;
 }
 
@@ -68,8 +75,11 @@ export const api = {
     req(`${CLIENTS_URL}?resource=clients`, { method: 'PUT', body: JSON.stringify(data) }),
 
   listVisits: (client_id: number): Promise<Visit[]> => req(`${CLIENTS_URL}?resource=visits&client_id=${client_id}`),
+  getVisit: (id: number): Promise<Visit> => req(`${CLIENTS_URL}?resource=visits&id=${id}`),
   createVisit: (data: Partial<Visit>): Promise<Visit> =>
     req(`${CLIENTS_URL}?resource=visits`, { method: 'POST', body: JSON.stringify(data) }),
+  updateVisit: (data: Partial<Visit> & { id: number; client_id: number }): Promise<Visit> =>
+    req(`${CLIENTS_URL}?resource=visits`, { method: 'PUT', body: JSON.stringify(data) }),
 
   listPhotos: (client_id: number): Promise<Photo[]> => req(`${CLIENTS_URL}?resource=photos&client_id=${client_id}`),
   uploadPhoto: (client_id: number, file_base64: string, caption?: string): Promise<Photo> =>
